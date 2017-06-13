@@ -52,7 +52,7 @@ gameconfig = json.loads ('''{
 
 "keyboard": "qwerty",
 "fontsize": 16,
-"fontname": "monof56.ttf",
+"fontname": null,
 "screen_width": 900,
 "screen_height": 600,
 
