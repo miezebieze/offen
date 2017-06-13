@@ -554,6 +554,3 @@ class Main (object):
                 gameconfig['sidebar_width'],
                 this.screen_rect.height-this.sidebar_rect.height)
 
-
-if __name__ == "__main__":
-    Story ().run ()
