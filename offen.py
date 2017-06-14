@@ -54,14 +54,22 @@ gameconfig = json.loads ('''{
 "screen_width": 900,
 "screen_height": 600,
 
-"colour_background": [ 51,51,51,255 ],
+"colours": {
+    "background": [ 33,33,33,255 ],
+    "button_shadow": [ 45,45,45,255 ],
+    "button_label": [ 255,255,255,255 ],
+    "button_hint": [ 200,200,200,255 ],
+    "button_border": [ 200,200,200,255 ],
+    "text": [ 255,255,255,255 ]
+},
+
 "textbox_margin": 5,
 "textbox_gap": 5,
 
 "button_margin": 6,
 
-"buttons_gap": 2,
-"buttons_margin": 2,
+"buttons_gap": 4,
+"buttons_margin": 3,
 
 "buttonpanel_nx": 5,
 "buttonpanel_ny": 4,
@@ -86,6 +94,7 @@ gameconfig.update ({
     'buttonpanel_keysyms': ['K_{0}'.format (k) for k in KEYBOARDLAYOUTS[gameconfig['keyboard']]],
     'menubar_keysyms': ['K_ESCAPE'] + ['K_F{0}'.format (n+1) for n in range (12)]
     })
+
 #-STUFF-----------------------------------------------------------------------#
 class Logger (object):
     levels = ['','ERRR','WARN','INFO','DEBG']
@@ -114,88 +123,53 @@ logger = Logger (4)
 class BaseOffenException (BaseException): ...
 def nop (*args,**kwargs): ...
 
-#-WRITER_INTERFACE------------------------------------------------------------#
-class Functions (object):
-    ''' advanced class with lots of double underscore functions and even a decorator (oooh)
-        Added functions have to have the story object as their first argument.
-        >>> 
-        # add function under its own __name__
-        >>> @this.function
-        ... def function (): ...
-        >>> this += function
-        # add function under alias
-        >>> this['alias'] = function
-        >>> this.alias = function
-        # get function
-        >>> this.alias
-        >>> this['function']
-    '''
-    def function (this,f):
-        @functools.wraps (f)
-        def decorated ():
-            return f (this.story)
-        vars (this)[decorated.__name__] = decorated
-        return decorated
-
-    def __init__ (this,story):
-        vars (this)['story'] = story
-
-    def __setattr__ (this,name,fun):
-        if isinstance (fun,types.FunctionType):
-            vars (this)[name] = functools.partial (fun,this.story)
-        else:
-            raise BaseOffenException ('Boo! This is no fun(ction):' + fun)
-
-    def __setitem__ (this,name,fun):
-        setattr (this,name,fun)
-
-    def __iadd__ (this,fun):
-        if isinstance (fun,types.FunctionType):
-            setattr (this,fun.__name__,fun)
-            return this
-        else:
-            raise BaseOffenException ('Boo! This is no fun(ction):' + fun)
-
-    def __getitem__ (this,name):
-        return getattr (this,name)
-
+#-WRITER_INTERFACE_PARTS------------------------------------------------------#
 class Button (object):
     ''' Has a function and a label.
         >>> this.set ('label')                  # set label
         >>> this.set (function)                 # set function
         >>> this.set ('label',function)         # set both
-        >>> this.set (( function,'label' ))     # set both; [Reihenfolge]'s not fixed
+        >>> this.set (( function,'label' ))     # set both; can be an iterator; order does not matter
+        >>> SO = StoryObject ()                 # make an instance;
+        # You can use offen.StoryObject or just make a class which has attributes '__call__' and 'label'
+        >>> this.set (SO)                       # set both; needs an instance!; gets label from SO
+        >>> this.set (SO,'explicit')            # set to SO; set label explicitly; order matters!
         >>> this.set ('label1','label2')        # set label to 'label2'; last one wins
-        >>> this ()                             # call function
+        >>> this ()                             # call function or object
         >>> this.clear ()                       # clear; reset values
     '''
     function = nop
     label = ''
 
-    def __init__ (this,tab,name):
-        this.tab = tab
+    def __init__ (this,buttons,name):
+        this.buttons = buttons
         this.name = name
 
     def set (this,*values):
         for value in values:
             if isinstance (value,Button):
                 this.function,this.label = value.function,value.label
-            elif isinstance (value,types.FunctionType):
+            elif hasattr (value,'__call__'):
                 this.function = value
+                if hasattr (value,'label'):
+                    this.set (value.label)
+                else:
+                    this.set (value.__name__)
             elif isinstance (value,str):
                 this.label = value
-                this.tab.button_updates.add (this.name)
+                this.buttons.updates.add (this.name)
             elif hasattr (value,'__iter__'):
                 # The has to be after str, because str is an iterable in python 3
                 this.set (*value)
             else:
                 logger.log ('Invalid input for Button:',value,l=1)
-                raise BaseOffenException ( )
+                raise BaseOffenException ()
 
-    def __call__ (this,*args,**kwargs):
-        return this.function (*args,**kwargs)
+    def __call__ (this):
+        return this.function ()
 
-    def clear (this): this.set (nop,'')
+    def clear (this):
+        this.set (nop,'')
 
 class Buttons (object):
     ''' Holds the Buttons of one tab.
@@ -211,18 +185,20 @@ class Buttons (object):
         >>> this.clear ()                       # same (until del works)
     '''
 
-    def __init__ (this,tab):
-        this.tab = tab
+    def __init__ (this,story,name):
+        this.story = story
+        this.name = name
         this.keys = set ()
+        this.updates = set ()
 
     def register_keys (this,*keys):
         for key in keys:
             if key.startswith ('K_'):
                 this.keys.add (key)
-                setattr (this,key,Button (this.tab,key))
+                setattr (this,key,Button (this,key))
             else:
                 this.register_keys ('K_' + key)
-        this.tab.story.game.register_button_keys (this.tab.name,keys)
+        this.story.game.register_button_keys (this.name,keys)
 
     def __getitem__ (this,k):
         if k.startswith ('K_'):
@@ -237,11 +213,12 @@ class Buttons (object):
             if k not in this.keys:
                 raise KeyError ('No button %s registered.' % k)
             this[k].set (v)
-            this.tab.button_updates.add (k)
+            this.updates.add (k)
         else:
             this['K_' + k] = v
 
     def clear (this):
+        this.updates.clear ()
         for k in this.keys:
             this[k].clear ()
 
@@ -254,19 +231,23 @@ class Paragraphs (object):
         >>> this.clear ()                       # clear
     '''
 
-    def __init__ (this,tab):
-        this.tab = tab
+    def __init__ (this,story,name):
+        this.story = story
+        this.name = name
         this.paragraphs = { }
+        this.updates = set ()
 
     def clear (this):
-        this.tab.paragraph_updates.update (this.keys ())
-        this.paragraphs = { }
+        ''' delete all paragraphs '''
+        this.updates.clear ()
+        this.updates.update (this.keys ())
+        this.paragraphs.clear ()
 
     def add (this,*strings):
         for string in strings:
             t = str (time.time ())
             this.paragraphs[t] = str (string)
-            this.tab.paragraph_updates.add (t)
+            this.updates.add (t)
 
     def __getitem__ (this,k):
         return this.paragraphs[k]
@@ -277,77 +258,136 @@ class Paragraphs (object):
     def items (this):
         return this.paragraphs.items ()
 
-class Tab (object):
-    ''' data container '''
+#-WRITER_INTERFACE------------------------------------------------------------#
+class StoryObject (object):
+    ''' A generic thing to give to give to your Buttons.
+        Inherit this when creating classes with @Story.object and
+        define 'call' and 'init' instead of __call__ and __init__.
+        '''
+    label = ''
 
-    def __init__ (this,story,name):
-        this.story = story
-        this.name = name
-        this.buttons = Buttons (this)
-        this.paragraphs = Paragraphs (this)
-        this.button_updates = set ()
-        this.paragraph_updates = set ()
+    def __init__ (this,S):
+        this.S = S
+        this.init ()
+    def init (this): ''' Overwrite me! '''
+
+    def __call__ (this):
+        this.call ()
+    def call (this): ''' Overwrite me! '''
 
 class Story (object):
     ''' main object and writer interface
 
     quick access to important instance members and their class:
-        T: current tab                  Tab
-        B: buttons of current tab       Buttons
-        P: paragraphs of current tab    Paragraphs
-        F: functions                    Functions
+        B: current buttons              Buttons
+        P: cureent paragraphs           Paragraphs
         V: variables                    dict
     '''
     keep_running = True
-    active_tab = None
+    active_buttons = None
+    active_paragraphs = None
+
+    def function (this,f):
+        ''' Create functions with automatical access to the main Story object. '''
+        @functools.wraps (f)
+        def decorated ():
+            return f (this)
+        return decorated
+
+    def object (this,c):
+        ''' Create objects with automatical access to the main Story object.
+            You should inherit offen.StoryObject.
+        '''
+        @functools.wraps (c)
+        def decorated ():
+            return c (this)
+        return decorated
 
     def stop (this):
         this.keep_running = False
 
-    def new_tab (this,name):
-        if name not in this.tabs.keys ():
-            this.game.register_tab (name)
-            this.tabs[name] = Tab (this,name)
-            this.tabs[name].buttons.register_keys (*gameconfig['buttonpanel_keysyms'])
+    def new_buttons (this,name):
+        if name not in this.buttonss.keys ():
+            this.game.register_buttons (name)
+            this.buttonss[name] = Buttons (this,name)
+            this.buttonss[name].register_keys (*gameconfig['buttonpanel_keysyms'])
         else:
-            logger.log ('Story already has a tab:',tab,'Not creating new one.',l=2)
+            logger.log ('Story already has a Buttons:',name,'Not creating new one.',l=2)
+
+    def del_buttons (this,name):
+        if name in this.buttonss.keys ():
+            this.game.unregister_buttons (name)
+            del this.buttonss[name]
+        else:
+            logger.log ('Story does not has a Buttons:',name,'Not deleting.',l=2)
+
+    def new_paragraphs (this,name):
+        if name not in this.paragraphss.keys ():
+            this.game.register_paragraphs (name)
+            this.paragraphss[name] = Paragraphs (this,name)
+        else:
+            logger.log ('Story already has a Paragraphs:',name,'Not creating new one.',l=2)
+
+    def del_paragraphs (this,name):
+        if name in this.paragraphss.keys ():
+            this.game.unregister_paragraphs (name)
+            del this.paragraphss[name]
+        else:
+            logger.log ('Story does not has a Paragraphs:',name,'Not deleting.',l=2)
+
+    def reset_vars (this,vars):
+        if isinstance (vars,dict):
+            this.vars = vars
+        else: # assume json
+            this.vars = json.loads (vars)
+
+    def update_vars (this,vars):
+        if isinstance (vars,dict):
+            this.vars.update (vars)
+        else: # assume json
+            this.vars.update (json.loads (vars))
+
+    def tell (this,*strings):
+        this.P.add (*strings)
 
     def __init__ (this):
         this.game = Main (this)
-        this.F = this.functions = Functions (this)
         this.V = this.vars = { }
-        this.tabs = { }
+        this.paragraphss = { }
+        this.buttonss = { }
         this.start = nop
 
         # A Tab, that holds all the buttons not in the buttonpanel. It has no paragraphs.
-        this.game.register_tab ('menu')
-        this.menu = Tab (this,'menu')
-        this.menu.buttons.register_keys (*gameconfig['menubar_keysyms'])
+        this.game.register_buttons ('menu')
+        this.M = Buttons (this,'menu')
+        this.M.register_keys (*gameconfig['menubar_keysyms'])
 
-        this.new_tab ('system')
+        this.new_paragraphs ('system')
+        this.new_buttons ('system')
+        this.P = 'system'
+        this.B = 'system'
 
-    def run (this,init_json=None):
-        if init_json is not None:
-            this.vars.update (json.loads (init_json))
+    def run (this):
         this.game.run ()
 
-    def __set_tab (this,tab):
-        if tab in this.tabs.keys ():
-            this.active_tab = this.tabs[tab]
+    def __set_p (this,p):
+        if p in this.paragraphss.keys ():
+            this.active_paragraphs = this.paragraphss[p]
         else:
-            raise BaseOffenException ('Not in names of registered tabs: ' + tab)
-    T = property (lambda this: this.active_tab,__set_tab,None,'Get active tab or Set by its name.')
+            raise BaseOffenException ('Not in names of registered Paragraphss: ' + p)
+    P = property (lambda this: this.active_paragraphs,__set_p)
 
-    @property
-    def P (this):
-        return this.active_tab.paragraphs
-    @property
-    def B (this):
-        return this.active_tab.buttons
+    def __set_b (this,b):
+        if b in this.buttonss.keys ():
+            this.active_buttons = this.buttonss[b]
+        else:
+            raise BaseOffenException ('Not in names of registered Buttonss: ' + b)
+    B = property (lambda this: this.active_buttons,__set_b)
 
 
 #-USER_INTERFACE--------------------------------------------------------------#
 class Main (object):
+    textbox_scroll_speed = 15
 
     def run (this):
         S = this.story
@@ -379,13 +419,12 @@ class Main (object):
                                     button_id = i
                     elif this.textbox_rect.collidepoint (e.pos):
                         if e.button == 4:
-                            #this.rerender_textbox = True
-                            this.textbox_scroll += 10
-                            if this.textbox_scroll > this.get_textbox_text_height (S.T) - this.textbox_rect.height:
-                                this.textbox_scroll = this.get_textbox_text_height (S.T) - this.textbox_rect.height
+                            if not this.get_textbox_text_height (S.P.name) < this.textbox_rect.height:
+                                this.textbox_scroll += this.textbox_scroll_speed
+                                if this.textbox_scroll > this.get_textbox_text_height (S.P.name) - this.textbox_rect.height:
+                                    this.textbox_scroll = this.get_textbox_text_height (S.P.name) - this.textbox_rect.height
                         elif e.button == 5:
-                            #this.rerender_textbox = True
-                            this.textbox_scroll -= 10
+                            this.textbox_scroll -= this.textbox_scroll_speed
                             if this.textbox_scroll < 0:
                                 this.textbox_scroll = 0
 
@@ -393,19 +432,20 @@ class Main (object):
                 try:
                     S.B[button_id].function ()
                 except KeyError:
-                    S.menu.buttons[button_id].function ()
+                    S.M[button_id].function ()
 
-            ### update
-            #if S.T.button_updates:
-            #    logger.log (S.T.button_updates,l=3)
-            this.process_tab_updates (S.T)
-            this.process_tab_updates (S.menu)
+            ### update / (re-)render stuff
+            this.process_buttons_updates (S.M)
+            this.process_buttons_updates (S.B)
+            this.process_paragraphs_updates (S.P)
 
             ### draw
+            this.screen.fill (gameconfig['colours']['background'])
             # TODO visual scroll indicator
-            this.screen.fill (( 0x33,0x33,0x33,0xff ))
-            this.draw_buttons (S.menu)
-            this.draw_tab (S.T)
+            this.draw_button_shadows ()
+            this.draw_buttons (S.M)
+            this.draw_buttons (S.B)
+            this.draw_paragraphs (S.P)
             #this.screen.blit (this.textbox_surf,this.textbox_rect.topleft)
             if debug_areas:
                 pygame.draw.rect (this.screen,( 0xee,0xee,0xee,0xff ),this.textbox_rect,1)
@@ -416,18 +456,18 @@ class Main (object):
             pygame.display.flip ()
             pygame.time.delay (100)
 
-    def draw_tab (this,tab):
-        this.draw_buttons (tab)
-        this.draw_textbox (tab)
+    def draw_button_shadows (this):
+        for id,i in this.button_rects.items ():
+            pygame.draw.rect (this.screen,gameconfig['colours']['button_shadow'],i)
 
-    def draw_buttons (this,tab):
-        for id,surf in this.button_label_surfs[tab.name].items ():
+    def draw_buttons (this,buttons):
+        for id,surf in this.button_surfs[buttons.name].items ():
             if surf is not None:
-                pygame.draw.rect (this.screen,( 0xff,0xff,0xff ),this.button_rects[id],1)
+                pygame.draw.rect (this.screen,gameconfig['colours']['button_border'],this.button_rects[id],1)
                 this.screen.blit (surf,this.button_rects[id].move (
                         gameconfig['buttons_gap'],gameconfig['buttons_gap']))
 
-    def draw_textbox (this,tab):
+    def draw_paragraphs (this,paragraphs):
         #if this.rerender_textbox:
         _tb_rect = this.textbox_rect
         # area of textbox - margins
@@ -435,7 +475,7 @@ class Main (object):
         top = _tb_rect.top + gameconfig['textbox_margin']
         # bottom of bottomest paragraph
         drawpos = bottom + this.textbox_scroll
-        for i,paragraph in enumerate (reversed (sorted (this.paragraph_surfs[tab.name].items ()))):
+        for i,paragraph in enumerate (reversed (sorted (this.paragraph_surfs[paragraphs.name].items ()))):
             if drawpos <= top: break
             p_surf = paragraph[1]
             p_rect = p_surf.get_rect ()
@@ -443,48 +483,54 @@ class Main (object):
 
             if _tb_rect.contains (p_rect):
                 this.screen.blit (p_surf,p_rect)
-            #if p_surf.get_rect ().top < this.textbox_rect.height:
-            #    this.textbox_surf.blit (p_surf,( gameconfig['textbox_margin'],y - p_surf.get_rect ().height ))
+            # TODO render overlapping paragraphs
             drawpos = drawpos - p_surf.get_rect ().height - gameconfig['textbox_gap']
 
-    def get_textbox_text_height (this,tab):
-        return sum ([ps.get_rect ().height for ps in this.paragraph_surfs[tab.name].values ()]) + gameconfig['textbox_gap'] * (len (this.paragraph_surfs) - 1)
+    def get_textbox_text_height (this,name):
+        return sum ([ps.get_rect ().height for ps in this.paragraph_surfs[name].values ()]) + gameconfig['textbox_gap'] * (len (this.paragraph_surfs[name]) - 1)
 
-    def process_tab_updates (this,tab):
+    def process_buttons_updates (this,buttons):
         # update buttons and rerender their labels
-        if tab.button_updates:
-            for id_ in tab.button_updates:
-                if tab.buttons[id_].label:
-                    this.button_label_surfs[tab.name][id_] = this.font.render (tab.buttons[id_].label,1,( 0xff,0xff,0xff,0xff ))
-                elif id_ in this.button_label_surfs[tab.name]:
-                    del this.button_label_surfs[tab.name][id_]
-            tab.button_updates.clear ()
-        # update paragraphs in textbox
-        if not tab.paragraphs:
-            this.paragraph_surfs[tab.name] = { }
-        elif tab.paragraph_updates:
-            for i in tab.paragraph_updates:
-                if i not in tab.paragraphs.keys ():
-                    del this.paragraph_surfs[tab.name][i]
-                else:
-                    this.paragraph_surfs[tab.name][i] = this.render_paragraph (tab.paragraphs[i])
-            tab.paragraph_updates.clear ()
+        for id_ in buttons.updates:
+            if buttons[id_].label:
+                this.button_surfs[buttons.name][id_] = this.font.render (buttons[id_].label,1,gameconfig['colours']['button_label'])
+            elif id_ in this.button_surfs[buttons.name]:
+                this.button_surfs[buttons.name][id_] = None
+        buttons.updates.clear ()
 
-    def register_tab (this,name):
-        if name not in this.button_label_surfs.keys ():
-            this.button_label_surfs[name] = {}
-            this.paragraph_surfs[name] = {}
+    def process_paragraphs_updates (this,paragraphs):
+        # update paragraphs in textbox
+        for i in paragraphs.updates:
+            if i not in paragraphs.keys ():
+                del this.paragraph_surfs[paragraphs.name][i]
+            else:
+                this.paragraph_surfs[paragraphs.name][i] = this.render_paragraph (paragraphs[i])
+        paragraphs.updates.clear ()
+
+    def register_buttons (this,name):
+        if name not in this.button_surfs.keys ():
+            this.button_surfs[name] = { }
+    def unregister_buttons (this,name):
+        if name in this.button_surfs.keys ():
+            del this.button_surfs[name]
+
+    def register_paragraphs (this,name):
+        if name not in this.paragraph_surfs.keys ():
+            this.paragraph_surfs[name] = { }
+    def unregister_paragraphs (this,name):
+        if name in this.paragraph_surfs.keys ():
+            del this.paragraph_surfs[name]
 
     def register_button_keys (this,name,keys):
-        if name in this.button_label_surfs.keys ():
-            this.button_label_surfs[name].update ({k:None for k in keys})
+        if name in this.button_surfs.keys ():
+            this.button_surfs[name].update ({k:None for k in keys})
         else:
-            logger.log ('Tab does not exist:',name,l=1)
+            logger.log ('Buttons is not registered:',name,l=1)
             raise BaseOffenException ()
 
     def render_paragraph (this,paragraph):
         # render words
-        word_surfs = [this.font.render (word,1,( 0xff,0xff,0xff,0xff )) for word in paragraph.split (' ')]
+        word_surfs = [this.font.render (word,1,gameconfig['colours']['text']) for word in paragraph.split (' ')]
 
         # stuff
         space_rect = this.space_surf.get_rect ()
@@ -498,13 +544,13 @@ class Main (object):
             if x + word.get_rect ().width > maxwidth:
                 x = 0
                 lines.append (pygame.Surface (line_rect.size,this.screen.get_flags ()))
-                lines[-1].fill (gameconfig['colour_background'])
+                lines[-1].fill (gameconfig['colours']['background'])
             lines[-1].blit (word,( x,0 ))
             x += word.get_rect ().width + space_rect.width
 
         # make paragraph and blit lines into
         paragraph_surf = pygame.Surface (( maxwidth,len (lines) * space_rect.height ),this.screen.get_flags ())
-        paragraph_surf.fill (gameconfig['colour_background'])
+        paragraph_surf.fill (gameconfig['colours']['background'])
         for x in range (len (lines)):
             paragraph_surf.blit (lines[x],( 0,x * space_rect.height ))
 
@@ -513,13 +559,13 @@ class Main (object):
     def __init__ (this,story):
         pygame.init ()
         this.story = story
-        this.screen = pygame.display.set_mode (( gameconfig['screen_width'],gameconfig['screen_height'] ),pygame.SRCALPHA)
+        this.screen = pygame.display.set_mode (( gameconfig['screen_width'],gameconfig['screen_height'] ),pygame.SRCALPHA,32)
         this.screen_rect = this.screen.get_rect ()
         this.font = pygame.font.Font (gameconfig['fontname'],gameconfig['fontsize'])
         this.space_surf = this.font.render (' ',0,( 0,0,0 ))
 
-        this.paragraph_surfs = { } # {tabname:{pid:surf}}
-        this.button_label_surfs = { } # {tabname:{buttonkey:surf}}
+        this.paragraph_surfs = { } # {Paragraphs.name:{pid:surf}}
+        this.button_surfs = { } # {Buttons.name:{buttonkey:surf}}
 
         this.ui_setup ()
 
@@ -549,8 +595,7 @@ class Main (object):
                         button_width,button_height)
 
         # Set up menubar key bindings.
-        #this.menubar_key_binding = { }
-        for i,key in enumerate (gameconfig['menubar_keysyms']):
+        for i,key in enumerate (gameconfig['menubar_keysyms'][:gameconfig['buttonpanel_nx']]):
             this.button_rects[key] = pygame.Rect (
                         gameconfig['buttons_margin']+i*(button_width+gameconfig['buttons_gap']),
                         gameconfig['buttons_margin'],

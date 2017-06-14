@@ -14,6 +14,10 @@ offen.gameconfig.update (json.loads ('''{
 """
 
 @S.F.function
+def explore (S):
+    ...
+
+@S.F.function
 def path_0 (S):
     S.B.clear ()
     S.B.K_w.set (place_0,'back')
@@ -32,7 +36,6 @@ def place_0 (S):
     S.B.K_1.set (offen.nop,'asdf')
     S.P.add ('''Hello World!''')
     S.P.add (S.V['foo'])
-    print (S.V['foo'])
 
 @S.F.function
 def custom_start (S):
