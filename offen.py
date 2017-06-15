@@ -66,7 +66,7 @@ gameconfig = json.loads ('''{
 "textbox_margin": 5,
 "textbox_gap": 5,
 
-"button_margin": 6,
+"button_margin": 5,
 
 "buttons_gap": 4,
 "buttons_margin": 3,
@@ -463,9 +463,9 @@ class Main (object):
     def draw_buttons (this,buttons):
         for id,surf in this.button_surfs[buttons.name].items ():
             if surf is not None:
-                pygame.draw.rect (this.screen,gameconfig['colours']['button_border'],this.button_rects[id],1)
-                this.screen.blit (surf,this.button_rects[id].move (
-                        gameconfig['buttons_gap'],gameconfig['buttons_gap']))
+                r = this.button_rects[id]
+                pygame.draw.rect (this.screen,gameconfig['colours']['button_border'],r,1)
+                this.screen.blit (surf,r.move ( gameconfig['button_margin'],r.height/2 - surf.get_rect ().height/2 ))
 
     def draw_paragraphs (this,paragraphs):
         #if this.rerender_textbox:
