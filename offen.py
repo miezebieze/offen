@@ -277,6 +277,11 @@ class StoryObject (object):
         this.call ()
     def call (this): ''' Overwrite me! '''
 
+    def __delete__ (this):
+        this.S.del_buttons (id (this))
+        this.delete ()
+    def delete (this): ''' Overwrite me! '''
+
 class Story (object):
     ''' main object and writer interface
 
