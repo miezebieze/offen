@@ -266,10 +266,12 @@ class StoryObject (object):
         '''
     label = ''
 
-    def __init__ (this,S):
+    def __init__ (this,S,*a,**kw):
         this.S = S
-        this.init ()
-    def init (this): ''' Overwrite me! '''
+        S.new_buttons (id (this))
+        this.buttons = this.S.buttonss[id (this)]
+        this.init (*a,**kw)
+    def init (this,*a,**kw): ''' Overwrite me! '''
 
     def __call__ (this):
         this.call ()
@@ -287,20 +289,20 @@ class Story (object):
     active_buttons = None
     active_paragraphs = None
 
-    def function (this,f):
+    def function (this,f,*a,**kw):
         ''' Create functions with automatical access to the main Story object. '''
         @functools.wraps (f)
-        def decorated ():
-            return f (this)
+        def decorated (*a,**kw):
+            return f (this,*a,**kw)
         return decorated
 
-    def object (this,c):
+    def object (this,c,*a,**kw):
         ''' Create objects with automatical access to the main Story object.
             You should inherit offen.StoryObject.
         '''
         @functools.wraps (c)
-        def decorated ():
-            return c (this)
+        def decorated (*a,**kw):
+            return c (this,*a,**kw)
         return decorated
 
     def stop (this):
