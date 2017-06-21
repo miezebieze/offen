@@ -75,23 +75,23 @@ gameconfig = json.loads ('''{
 "buttonpanel_ny": 4,
 
 "sidebar_width": 170,
-"sidebar_margin": 2
+"sidebar_margin": 2,
+
+"keyboard_layouts": {
+    "qwerty": [ "1","2","3","4","5", "q","w","e","r","t", "a","s","d","f","g", "z","x","c","v","b" ]
+    }
 } ''')
 
 # Try to load game.json:
 try:
-    with open ('game.json','r') as conf:
+    with open ('offen.json','r') as conf:
         gameconfig.update (json.load (conf))
 except FileNotFoundError:
     pass
 
 # Compute and add additional settings:
-KEYBOARDLAYOUTS = {
-    'qwerty': [ "1","2","3","4","5", "q","w","e","r","t", "a","s","d","f","g", "z","x","c","v","b" ]
-    }
-
 gameconfig.update ({
-    'buttonpanel_keysyms': ['K_{0}'.format (k) for k in KEYBOARDLAYOUTS[gameconfig['keyboard']]],
+    'buttonpanel_keysyms': ['K_{0}'.format (k) for k in gameconfig['keyboard_layouts'][gameconfig['keyboard']]],
     'menubar_keysyms': ['K_ESCAPE'] + ['K_F{0}'.format (n+1) for n in range (12)]
     })
 
@@ -138,12 +138,21 @@ class Button (object):
         >>> this ()                             # call function or object
         >>> this.clear ()                       # clear; reset values
     '''
-    function = nop
+    _function = nop
     label = ''
 
     def __init__ (this,buttons,name):
         this.buttons = buttons
         this.name = name
+
+    def __set_function (this,function):
+        if function is not this._function:
+            if isinstance (this._function,StoryObject):
+                this._function.unregister_parent (this)
+            this._function = function
+            if isinstance (this._function,StoryObject):
+                this._function.register_parent (this)
+    function = property (lambda this: this._function,__set_function)
 
     def set (this,*values):
         for value in values:
@@ -165,6 +174,9 @@ class Button (object):
                 logger.log ('Invalid input for Button:',value,l=1)
                 raise BaseOffenException ()
 
+    def update (this):
+        this.buttons.updates.add (this)
+
     def __call__ (this):
         return this.function ()
 
@@ -184,10 +196,11 @@ class Buttons (object):
         >>> this.K_b.set ('label',nop)          # set Button
         >>> this.clear ()                       # same (until del works)
     '''
+    NOBUTTON = 'No button with key %s / %s registered.'
 
-    def __init__ (this,story,name):
+    def __init__ (this,story,object):
         this.story = story
-        this.name = name
+        this.object = object
         this.keys = set ()
         this.updates = set ()
 
@@ -198,12 +211,12 @@ class Buttons (object):
                 setattr (this,key,Button (this,key))
             else:
                 this.register_keys ('K_' + key)
-        this.story.game.register_button_keys (this.name,keys)
+        this.story.game.register_button_keys (this.object,keys)
 
     def __getitem__ (this,k):
         if k.startswith ('K_'):
             if k not in this.keys:
-                raise KeyError ('No button with key %s registered.' % k)
+                raise KeyError (this.NOBUTTON % (k,k[-1]))
             return getattr (this,k)
         else:
             return this['K_' + k]
@@ -211,7 +224,7 @@ class Buttons (object):
     def __setitem__ (this,k,v):
         if k.startswith ('K_'):
             if k not in this.keys:
-                raise KeyError ('No button %s registered.' % k)
+                raise KeyError (this.NOBUTTON % (k,k[-1]))
             this[k].set (v)
             this.updates.add (k)
         else:
@@ -261,26 +274,48 @@ class Paragraphs (object):
 #-WRITER_INTERFACE------------------------------------------------------------#
 class StoryObject (object):
     ''' A generic thing to give to give to your Buttons.
-        Inherit this when creating classes with @Story.object and
-        define 'call' and 'init' instead of __call__ and __init__.
-        '''
-    label = ''
+        Inherit this when creating classes with @Story.object .
+        If you define __init__, the second parameter must be the story object.
+        If you define __init__, __call__ or __delete__, you need to write either of
+            super ().__init__ (S,[label,][...,]*a,**kw)
+            super ().__call__ ()
+            super ().__delete__ ()
+        on the next line.
+    '''
+    # TODO: have an automatic super ().__****__ (S)
+    _label = None
 
-    def __init__ (this,S,*a,**kw):
+    def __init__ (this,S,label=None,*a,**kw):
         this.S = S
-        S.new_buttons (id (this))
-        this.buttons = this.S.buttonss[id (this)]
-        this.init (*a,**kw)
-    def init (this,*a,**kw): ''' Overwrite me! '''
+        if label is not None:
+            this._label = label
+        elif this._label is None:
+            label = this.__repr__
+            logger.log ("StoryObject '{}' has no label.".format (this),l=2)
+        # else: skip
+        S.new_buttons (this)
+        this.buttons = this.S.buttonss[this]
+        this.parents = [] # things that take an interest in changes of this.label
+
+    def register_parent (this,parent):
+        this.parents.append (parent)
+    def unregister_parent (this,parent):
+        if parent in this.parents:
+            del this.parents[this.parents.index (parent)]
+
+    def __set_label (this,label):
+        if label != this._label:
+            for i in this.parents:
+                i.update (this)
+            this._label = label
+    label = property (lambda this: this._label,__set_label)
 
     def __call__ (this):
-        this.call ()
-    def call (this): ''' Overwrite me! '''
+        ''' Overwrite me! '''
 
     def __delete__ (this):
-        this.S.del_buttons (id (this))
-        this.delete ()
-    def delete (this): ''' Overwrite me! '''
+        ''' Overwrite me! '''
+        this.S.del_buttons (this)
 
 class Story (object):
     ''' main object and writer interface
@@ -313,62 +348,51 @@ class Story (object):
     def stop (this):
         this.keep_running = False
 
-    def new_buttons (this,name):
-        if name not in this.buttonss.keys ():
-            this.game.register_buttons (name)
-            this.buttonss[name] = Buttons (this,name)
-            this.buttonss[name].register_keys (*gameconfig['buttonpanel_keysyms'])
+    def new_buttons (this,object):
+        if object not in this.buttonss.keys ():
+            this.game.register_buttons (object)
+            this.buttonss[object] = Buttons (this,object)
+            this.buttonss[object].register_keys (*gameconfig['buttonpanel_keysyms'])
         else:
-            logger.log ('Story already has a Buttons:',name,'Not creating new one.',l=2)
+            logger.log ('Story already has a Buttons:',object.label,'Not creating new one.',l=2)
 
-    def del_buttons (this,name):
-        if name in this.buttonss.keys ():
-            this.game.unregister_buttons (name)
-            del this.buttonss[name]
+    def del_buttons (this,object):
+        if object in this.buttonss.keys ():
+            this.game.unregister_buttons (object)
+            del this.buttonss[object]
         else:
-            logger.log ('Story does not has a Buttons:',name,'Not deleting.',l=2)
+            logger.log ('Story does not has a Buttons:',object.label,'Not deleting.',l=2)
 
-    def new_paragraphs (this,name):
-        if name not in this.paragraphss.keys ():
-            this.game.register_paragraphs (name)
-            this.paragraphss[name] = Paragraphs (this,name)
+    def new_paragraphs (this,object):
+        if object not in this.paragraphss.keys ():
+            this.game.register_paragraphs (object)
+            this.paragraphss[object] = Paragraphs (this,object)
         else:
-            logger.log ('Story already has a Paragraphs:',name,'Not creating new one.',l=2)
+            logger.log ('Story already has a Paragraphs:',object.label,'Not creating new one.',l=2)
 
-    def del_paragraphs (this,name):
-        if name in this.paragraphss.keys ():
-            this.game.unregister_paragraphs (name)
-            del this.paragraphss[name]
+    def del_paragraphs (this,object):
+        if object in this.paragraphss.keys ():
+            this.game.unregister_paragraphs (object)
+            del this.paragraphss[object]
         else:
-            logger.log ('Story does not has a Paragraphs:',name,'Not deleting.',l=2)
-
-    def reset_vars (this,vars):
-        if isinstance (vars,dict):
-            this.vars = vars
-        else: # assume json
-            this.vars = json.loads (vars)
-
-    def update_vars (this,vars):
-        if isinstance (vars,dict):
-            this.vars.update (vars)
-        else: # assume json
-            this.vars.update (json.loads (vars))
+            logger.log ('Story does not has a Paragraphs:',object.label,'Not deleting.',l=2)
 
     def tell (this,*strings):
         this.P.add (*strings)
 
     def __init__ (this):
         this.game = Main (this)
-        this.V = this.vars = { }
+        this.vars = { }
         this.paragraphss = { }
         this.buttonss = { }
         this.start = nop
 
-        # A Tab, that holds all the buttons not in the buttonpanel. It has no paragraphs.
+        # A Tab, that holds all the buttons for the menubar. It has no paragraphs.
         this.game.register_buttons ('menu')
         this.M = Buttons (this,'menu')
         this.M.register_keys (*gameconfig['menubar_keysyms'])
 
+        # The main Buttons and Paragraphs
         this.new_paragraphs ('system')
         this.new_buttons ('system')
         this.P = 'system'
@@ -376,6 +400,19 @@ class Story (object):
 
     def run (this):
         this.game.run ()
+
+    ### single letter attributes
+    def reset_vars (this,vars):
+        if isinstance (vars,dict):
+            this.vars = vars
+        else: # assume json
+            this.vars = json.loads (vars)
+    def update_vars (this,vars):
+        if isinstance (vars,dict):
+            this.vars.update (vars)
+        else: # assume json
+            this.vars.update (json.loads (vars))
+    V = property (lambda this: this.vars,reset_vars)
 
     def __set_p (this,p):
         if p in this.paragraphss.keys ():
@@ -468,7 +505,7 @@ class Main (object):
             pygame.draw.rect (this.screen,gameconfig['colours']['button_shadow'],i)
 
     def draw_buttons (this,buttons):
-        for id,surf in this.button_surfs[buttons.name].items ():
+        for id,surf in this.button_surfs[buttons.object].items ():
             if surf is not None:
                 r = this.button_rects[id]
                 pygame.draw.rect (this.screen,gameconfig['colours']['button_border'],r,1)
@@ -500,9 +537,9 @@ class Main (object):
         # update buttons and rerender their labels
         for id_ in buttons.updates:
             if buttons[id_].label:
-                this.button_surfs[buttons.name][id_] = this.font.render (buttons[id_].label,1,gameconfig['colours']['button_label'])
-            elif id_ in this.button_surfs[buttons.name]:
-                this.button_surfs[buttons.name][id_] = None
+                this.button_surfs[buttons.object][id_] = this.font.render (buttons[id_].label,1,gameconfig['colours']['button_label'])
+            elif id_ in this.button_surfs[buttons.object]:
+                this.button_surfs[buttons.object][id_] = None
         buttons.updates.clear ()
 
     def process_paragraphs_updates (this,paragraphs):
@@ -572,7 +609,7 @@ class Main (object):
         this.space_surf = this.font.render (' ',0,( 0,0,0 ))
 
         this.paragraph_surfs = { } # {Paragraphs.name:{pid:surf}}
-        this.button_surfs = { } # {Buttons.name:{buttonkey:surf}}
+        this.button_surfs = { } # {Buttons.object:{buttonkey:surf}}
 
         this.ui_setup ()
 
