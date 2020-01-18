@@ -1,9 +1,23 @@
-# Offen
-Open FenFen is an engine for interactive fiction and text adventures.
+OFFen
+===
+Open FenFEN is an engine for interactive fiction and text adventures mimicking the style of the games from the author it's name is derived from.
 
+documentation
+===
 For now all existing documentation can be found in the docstrings and comments of offen.py and example.py only.
 
+installation
+===
+*Before running (and pip failing to install pygame into the virtualenv (and you having to clean up before trying again)) make sure you have all requirements for pygame.*
+
+*The easiest way to do this is by installing pygame to your system.*
+
 example.py
-==========
+===
 example for basic usage
 
+running the example
+---
+`cd /path/to/offen`
+
+`make`
