@@ -5,5 +5,5 @@ For now all existing documentation can be found in the docstrings and comments o
 
 example.py
 ==========
-Very simple example for interactive fiction.
+example for basic usage
 
