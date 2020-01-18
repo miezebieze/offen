@@ -7,10 +7,3 @@ fiction.py
 ==========
 Very simple example for interactive fiction.
 
-gauntlet.py
-===========
-Advanced example for a rogue like text adventure.
-
-basics.py
----------
-classes for gauntlet

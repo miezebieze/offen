@@ -4,9 +4,10 @@ import pygame
 import json
 import time
 import functools # partial,wraps
-import types # FunctionType
-import pdb
-import sys
+#import types # FunctionType
+#import pdb
+#import sys
+import random
 
 #-DOC-------------------------------------------------------------------------#
 """
@@ -45,7 +46,8 @@ import sys
 #-SETUP-----------------------------------------------------------------------#
 # Default config:
 # having the json handy for pasting into a file is nice.
-gameconfig = json.loads ('''{
+gameconfig = json.loads ('''\
+{
 "undo_scrollback": 128,
 
 "keyboard": "qwerty",
@@ -80,7 +82,8 @@ gameconfig = json.loads ('''{
 "keyboard_layouts": {
     "qwerty": [ "1","2","3","4","5", "q","w","e","r","t", "a","s","d","f","g", "z","x","c","v","b" ]
     }
-} ''')
+}
+''')
 
 # Try to load game.json:
 try:
@@ -162,7 +165,7 @@ class Button (object):
                 this.function = value
                 if hasattr (value,'label'):
                     this.set (value.label)
-                else:
+                elif not isinstance (value,functools.partial):
                     this.set (value.__name__)
             elif isinstance (value,str):
                 this.label = value
@@ -183,6 +186,10 @@ class Button (object):
     def clear (this):
         this.set (nop,'')
 
+    @property
+    def free (this):
+        return this.function is nop and this.label == ''
+
 class Buttons (object):
     ''' Holds the Buttons of one tab.
     dict wrapper with explicitly changeable keys, which begin with K_
@@ -201,14 +208,17 @@ class Buttons (object):
     def __init__ (this,story,object):
         this.story = story
         this.object = object
-        this.keys = set ()
+        this.keys = [ ]
         this.updates = set ()
 
     def register_keys (this,*keys):
         for key in keys:
             if key.startswith ('K_'):
-                this.keys.add (key)
-                setattr (this,key,Button (this,key))
+                if key not in this.keys:
+                    this.keys.append (key)
+                    setattr (this,key,Button (this,key))
+                else:
+                    raise BaseOffenException ('Key {} already registered.'.format (key))
             else:
                 this.register_keys ('K_' + key)
         this.story.game.register_button_keys (this.object,keys)
@@ -234,6 +244,20 @@ class Buttons (object):
         this.updates.clear ()
         for k in this.keys:
             this[k].clear ()
+
+    def __get_random_button (this,free=True):
+        b = None
+        while True:
+            b = this[random.choice (this.keys)]
+            if free and b.free:
+                # continue until a free button is chosen
+                continue
+            # choose any button
+            break
+        return b
+
+    random_free_button = property (lambda this: this.__get_random_button ())
+    random_button = property (lambda this: this.__get_random_button (False))
 
 class Paragraphs (object):
     ''' Holds the paragraphs of one tab.
@@ -290,7 +314,7 @@ class StoryObject (object):
         if label is not None:
             this._label = label
         elif this._label is None:
-            label = this.__repr__
+            this._label = this.__repr__
             logger.log ("StoryObject '{}' has no label.".format (this),l=2)
         # else: skip
         S.new_buttons (this)
@@ -329,6 +353,7 @@ class Story (object):
     active_buttons = None
     active_paragraphs = None
 
+    # decorators
     def function (this,f,*a,**kw):
         ''' Create functions with automatical access to the main Story object. '''
         @functools.wraps (f)
@@ -345,9 +370,7 @@ class Story (object):
             return c (this,*a,**kw)
         return decorated
 
-    def stop (this):
-        this.keep_running = False
-
+    # buttons and paragraphs management
     def new_buttons (this,object):
         if object not in this.buttonss.keys ():
             this.game.register_buttons (object)
@@ -377,15 +400,34 @@ class Story (object):
         else:
             logger.log ('Story does not has a Paragraphs:',object.label,'Not deleting.',l=2)
 
+    # pre and post action functions
+    def register_pre_action (this,k,f):
+        this._preaction[k] = f
+    def register_post_action (this,k,f):
+        this._postaction[k] = f
+
+    def preaction (this):
+        for k in this._preaction.keys ():
+            this._preaction[k] ()
+    def postaction (this):
+        for k in this._postaction.keys ():
+            this._postaction[k] ()
+
+    # story functions
     def tell (this,*strings):
         this.P.add (*strings)
 
+    # init/run/stop
     def __init__ (this):
         this.game = Main (this)
         this.vars = { }
         this.paragraphss = { }
         this.buttonss = { }
         this.start = nop
+
+        # functions called before and after any action
+        this._preaction = { }
+        this._postaction = { }
 
         # A Tab, that holds all the buttons for the menubar. It has no paragraphs.
         this.game.register_buttons ('menu')
@@ -400,6 +442,9 @@ class Story (object):
 
     def run (this):
         this.game.run ()
+
+    def stop (this):
+        this.keep_running = False
 
     ### single letter attributes
     def reset_vars (this,vars):
@@ -449,6 +494,7 @@ class Main (object):
             for e in pygame.event.get ():
                 if e.type == pygame.QUIT:
                     S.stop ()
+                    break
                 elif e.type == pygame.KEYDOWN:
                     # keyboard scrolling
                     try:
@@ -457,11 +503,13 @@ class Main (object):
                         ...
                 elif e.type == pygame.MOUSEBUTTONDOWN:
                     if this.buttonpanel_rect.collidepoint (e.pos):
+                        # button clicking
                         if e.button == 1:
                             for i,rect in this.button_rects.items ():
                                 if rect.collidepoint (e.pos):
                                     button_id = i
                     elif this.textbox_rect.collidepoint (e.pos):
+                        # text scrolling
                         if e.button == 4:
                             if not this.get_textbox_text_height (S.P.name) < this.textbox_rect.height:
                                 this.textbox_scroll += this.textbox_scroll_speed
@@ -473,9 +521,11 @@ class Main (object):
                                 this.textbox_scroll = 0
 
             if button_id is not None:
-                try:
+                if button_id in S.B.keys:
+                    S.preaction ()
                     S.B[button_id].function ()
-                except KeyError:
+                    S.postaction ()
+                else:
                     S.M[button_id].function ()
 
             ### update / (re-)render stuff
@@ -499,6 +549,14 @@ class Main (object):
 
             pygame.display.flip ()
             pygame.time.delay (100)
+
+        else:
+            this.quit ()
+
+    def quit (this):
+        # The usual pygame.quit ();sys.exit () doesn't work for me for some reason.
+        pygame.display.quit ()
+        exit ()
 
     def draw_button_shadows (this):
         for id,i in this.button_rects.items ():
