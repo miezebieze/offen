@@ -1,6 +1,6 @@
 #!/bin/python
 # game.py
-import offen
+from . import offen
 ''' A very simple example.
 Bonus: How to change the number of buttons.
 '''

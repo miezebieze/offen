@@ -6,7 +6,7 @@ import time
 import functools # partial,wraps
 #import types # FunctionType
 #import pdb
-#import sys
+import sys
 import random
 
 #-DOC-------------------------------------------------------------------------#
@@ -554,9 +554,8 @@ class Main (object):
             this.quit ()
 
     def quit (this):
-        # The usual pygame.quit ();sys.exit () doesn't work for me for some reason.
-        pygame.display.quit ()
-        exit ()
+        pygame.quit ()
+        sys.exit ()
 
     def draw_button_shadows (this):
         for id,i in this.button_rects.items ():
