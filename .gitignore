@@ -4,3 +4,5 @@
 *.pyc
 venv/
 build/
+dist/
+open_fenfen.egg-info/

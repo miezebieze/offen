@@ -4,7 +4,7 @@ play: vbuild
 	. venv/bin/activate; python -m offen.example
 
 vbuild: venv
-	. venv/bin/activate; python setup.py build
+	. venv/bin/activate; python setup.py sdist bdist_wheel
 
 push:
 	git commit -a
