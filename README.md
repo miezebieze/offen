@@ -1,4 +1,4 @@
-OFFen
+OFFEN
 ===
 Open FenFEN is an engine for interactive fiction and text adventures mimicking the style of the games from the author it's name is derived from.
 
@@ -12,9 +12,14 @@ installation
 
 *The easiest way to do this is by installing pygame to your system.*
 
+TODO
+add instruction to create a project with virtualenv
+mkdir; python -m venv venv; . venv/bin/activate; pip install path_to_offen_package
+
 example.py
 ===
 example for basic usage
+to be moved to another project or branch
 
 running the example
 ---
