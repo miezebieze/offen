@@ -6,7 +6,7 @@ with open ('README.md','r') as fh:
 
 setuptools.setup (
     name = 'open-fenfen',
-    version = '0.0.1',
+    version = '0.5.0',
     author = 'Asterisk',
     author_email = '',
     description = 'Framework for interactive fiction and text adventures.',
